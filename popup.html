@@ -6,6 +6,70 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GitHub PR Review Export Settings</title>
     <style>
+        :root {
+            /* Light theme colors (default) */
+            --bg-primary: #ffffff;
+            --bg-secondary: #f6f8fa;
+            --bg-tertiary: #ffffff;
+            --border-color: #d0d7de;
+            --border-focus: #0969da;
+            --text-primary: #1f2328;
+            --text-secondary: #656d76;
+            --text-muted: #8b949e;
+            --text-heading: #1f2328;
+            --input-bg: #ffffff;
+            --input-border: #d0d7de;
+            --input-text: #1f2328;
+            --btn-secondary-bg: #f6f8fa;
+            --btn-secondary-border: rgba(31, 35, 40, 0.15);
+            --btn-secondary-text: #24292f;
+            --btn-secondary-hover-bg: #f3f4f6;
+            --btn-primary-bg: #238636;
+            --btn-primary-border: #238636;
+            --btn-primary-text: #ffffff;
+            --btn-primary-hover-bg: #2ea043;
+            --success-bg: rgba(35, 134, 54, 0.15);
+            --success-border: #238636;
+            --success-text: #1a7f37;
+            --error-bg: rgba(248, 81, 73, 0.15);
+            --error-border: #f85149;
+            --error-text: #cf222e;
+            --focus-shadow: rgba(9, 105, 218, 0.3);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                /* Dark theme colors */
+                --bg-primary: #0d1117;
+                --bg-secondary: #0d1117;
+                --bg-tertiary: #161b22;
+                --border-color: #30363d;
+                --border-focus: #58a6ff;
+                --text-primary: #c9d1d9;
+                --text-secondary: #8b949e;
+                --text-muted: #6e7681;
+                --text-heading: #f0f6fc;
+                --input-bg: #161b22;
+                --input-border: #30363d;
+                --input-text: #c9d1d9;
+                --btn-secondary-bg: #21262d;
+                --btn-secondary-border: #30363d;
+                --btn-secondary-text: #c9d1d9;
+                --btn-secondary-hover-bg: #30363d;
+                --btn-primary-bg: #238636;
+                --btn-primary-border: #238636;
+                --btn-primary-text: #ffffff;
+                --btn-primary-hover-bg: #2ea043;
+                --success-bg: rgba(35, 134, 54, 0.2);
+                --success-border: #238636;
+                --success-text: #3fb950;
+                --error-bg: rgba(248, 81, 73, 0.2);
+                --error-border: #f85149;
+                --error-text: #f85149;
+                --focus-shadow: rgba(88, 166, 255, 0.3);
+            }
+        }
+
         * {
             box-sizing: border-box;
             margin: 0;
@@ -16,8 +80,8 @@
             width: 400px;
             min-height: 300px;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-            background: #0d1117;
-            color: #c9d1d9;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             padding: 16px;
         }
 
@@ -27,7 +91,7 @@
             gap: 12px;
             margin-bottom: 16px;
             padding-bottom: 12px;
-            border-bottom: 1px solid #30363d;
+            border-bottom: 1px solid var(--border-color);
         }
 
         .header-icon {
@@ -44,12 +108,12 @@
         .header-text h1 {
             font-size: 16px;
             font-weight: 600;
-            color: #f0f6fc;
+            color: var(--text-heading);
         }
 
         .header-text p {
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-secondary);
         }
 
         .section {
@@ -59,13 +123,13 @@
         .section-title {
             font-size: 14px;
             font-weight: 600;
-            color: #f0f6fc;
+            color: var(--text-heading);
             margin-bottom: 8px;
         }
 
         .section-desc {
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-secondary);
             margin-bottom: 8px;
         }
 
@@ -73,10 +137,10 @@
             width: 100%;
             min-height: 120px;
             padding: 12px;
-            background: #161b22;
-            border: 1px solid #30363d;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
             border-radius: 6px;
-            color: #c9d1d9;
+            color: var(--input-text);
             font-family: inherit;
             font-size: 13px;
             line-height: 1.5;
@@ -85,12 +149,12 @@
 
         textarea:focus {
             outline: none;
-            border-color: #58a6ff;
-            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--focus-shadow);
         }
 
         textarea::placeholder {
-            color: #6e7681;
+            color: var(--text-muted);
         }
 
         .button-group {
@@ -109,25 +173,25 @@
         }
 
         .btn-primary {
-            background: #238636;
-            border: 1px solid #238636;
-            color: #fff;
+            background: var(--btn-primary-bg);
+            border: 1px solid var(--btn-primary-border);
+            color: var(--btn-primary-text);
         }
 
         .btn-primary:hover {
-            background: #2ea043;
-            border-color: #2ea043;
+            background: var(--btn-primary-hover-bg);
+            border-color: var(--btn-primary-hover-bg);
         }
 
         .btn-secondary {
-            background: #21262d;
-            border: 1px solid #30363d;
-            color: #c9d1d9;
+            background: var(--btn-secondary-bg);
+            border: 1px solid var(--btn-secondary-border);
+            color: var(--btn-secondary-text);
         }
 
         .btn-secondary:hover {
-            background: #30363d;
-            border-color: #8b949e;
+            background: var(--btn-secondary-hover-bg);
+            border-color: var(--text-secondary);
         }
 
         .status {
@@ -140,21 +204,21 @@
 
         .status.success {
             display: block;
-            background: rgba(35, 134, 54, 0.2);
-            border: 1px solid #238636;
-            color: #3fb950;
+            background: var(--success-bg);
+            border: 1px solid var(--success-border);
+            color: var(--success-text);
         }
 
         .status.error {
             display: block;
-            background: rgba(248, 81, 73, 0.2);
-            border: 1px solid #f85149;
-            color: #f85149;
+            background: var(--error-bg);
+            border: 1px solid var(--error-border);
+            color: var(--error-text);
         }
 
         .char-count {
             font-size: 11px;
-            color: #6e7681;
+            color: var(--text-muted);
             text-align: right;
             margin-top: 4px;
         }

@@ -364,11 +364,53 @@
   }
 
   /**
-   * Create the export button with GitHub-like styling
+   * Get GitHub Primer-compatible button styles
+   */
+  function getButtonStyles() {
+    const dark = isDarkMode();
+    return {
+      base: `
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3px 8px;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 20px;
+        white-space: nowrap;
+        vertical-align: middle;
+        cursor: pointer;
+        user-select: none;
+        border: 1px solid;
+        border-radius: 6px;
+        transition: 80ms cubic-bezier(0.33, 1, 0.68, 1);
+        transition-property: color, background-color, border-color;
+      `,
+      secondary: dark ? `
+        color: #c9d1d9;
+        background-color: #21262d;
+        border-color: rgba(240, 246, 252, 0.1);
+      ` : `
+        color: #24292f;
+        background-color: #f6f8fa;
+        border-color: rgba(31, 35, 40, 0.15);
+      `,
+      secondaryHover: dark ? `
+        background-color: #30363d;
+        border-color: #8b949e;
+      ` : `
+        background-color: #f3f4f6;
+        border-color: rgba(31, 35, 40, 0.15);
+      `
+    };
+  }
+
+  /**
+   * Create the export button with GitHub Primer-like styling
    */
   function createExportButton(commentEl, botConfig, includeInstruction = false) {
     const btn = document.createElement("button");
-    btn.className = includeInstruction ? "pr-review-export-instr-btn btn btn-sm" : "pr-review-export-btn btn btn-sm";
+    btn.className = includeInstruction ? "pr-review-export-instr-btn" : "pr-review-export-btn";
     btn.type = "button";
 
     // Determine label
@@ -379,7 +421,18 @@
       defaultLabel = botConfig ? botConfig.buttonLabel : "Export Review";
     }
     btn.textContent = defaultLabel;
-    btn.style.cssText = "margin-left: 8px;";
+
+    // Apply Primer-compatible styles
+    const styles = getButtonStyles();
+    btn.style.cssText = styles.base + styles.secondary;
+
+    // Hover effects
+    btn.addEventListener("mouseenter", () => {
+      btn.style.cssText = styles.base + styles.secondaryHover;
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.cssText = styles.base + styles.secondary;
+    });
 
     btn.addEventListener("click", async (e) => {
       e.preventDefault();
@@ -886,7 +939,26 @@
   }
 
   /**
+   * Create a container for export buttons with responsive layout
+   */
+  function createButtonContainer() {
+    const container = document.createElement("div");
+    container.className = "pr-review-export-container";
+    container.style.cssText = `
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-left: 8px;
+      vertical-align: middle;
+    `;
+    return container;
+  }
+
+  /**
    * Inject export buttons next to the Resolve conversation button (inline)
+   * Uses a responsive container that keeps buttons on same line when possible,
+   * but wraps gracefully when width is insufficient
    */
   function injectButtonsIntoThread(threadContainer) {
     if (!threadContainer) return;
@@ -911,24 +983,36 @@
     );
 
     if (resolveForm) {
+      // Create button container for responsive layout
+      const btnContainer = createButtonContainer();
+
       // Create both buttons
       const exportBtn = createExportButton(firstComment, botConfig, false);
       const exportInstrBtn = createExportButton(firstComment, botConfig, true);
 
-      exportBtn.style.cssText = "margin-left: 8px; display: inline-block; vertical-align: middle;";
-      exportInstrBtn.style.cssText = "margin-left: 8px; display: inline-block; vertical-align: middle;";
+      btnContainer.appendChild(exportBtn);
+      btnContainer.appendChild(exportInstrBtn);
 
-      // Insert buttons after the resolve form
-      resolveForm.insertAdjacentElement("afterend", exportInstrBtn);
-      resolveForm.insertAdjacentElement("afterend", exportBtn);
+      // Insert container after the resolve form
+      resolveForm.insertAdjacentElement("afterend", btnContainer);
 
-      // Wrap in a flex container if not already
+      // Apply minimal flex styling to parent for proper alignment
+      // Use CSS that doesn't destructively override existing styles
       const parent = resolveForm.parentElement;
-      if (parent && !parent.style.display.includes("flex")) {
-        parent.style.display = "flex";
-        parent.style.alignItems = "center";
-        parent.style.flexWrap = "wrap";
-        parent.style.gap = "8px";
+      if (parent) {
+        const currentDisplay = window.getComputedStyle(parent).display;
+        // Only modify if it's block-level, preserve existing flex layouts
+        if (currentDisplay === "block" || currentDisplay === "inline") {
+          parent.style.display = "flex";
+          parent.style.flexWrap = "wrap";
+          parent.style.alignItems = "center";
+          parent.style.gap = "8px";
+        } else if (currentDisplay === "flex" || currentDisplay === "inline-flex") {
+          // Already flex, just ensure wrap is enabled
+          if (!parent.style.flexWrap) {
+            parent.style.flexWrap = "wrap";
+          }
+        }
       }
       return;
     }
@@ -940,14 +1024,19 @@
     );
 
     if (threadFooter) {
+      // Create button container
+      const btnContainer = createButtonContainer();
+      btnContainer.style.marginLeft = "16px";
+      btnContainer.style.marginTop = "8px";
+      btnContainer.style.marginBottom = "8px";
+
       const exportBtn = createExportButton(firstComment, botConfig, false);
       const exportInstrBtn = createExportButton(firstComment, botConfig, true);
 
-      exportBtn.style.cssText = "margin: 8px 8px 8px 16px; display: inline-block;";
-      exportInstrBtn.style.cssText = "margin: 8px 8px 8px 0; display: inline-block;";
+      btnContainer.appendChild(exportBtn);
+      btnContainer.appendChild(exportInstrBtn);
 
-      threadFooter.insertAdjacentElement("beforebegin", exportInstrBtn);
-      threadFooter.insertAdjacentElement("beforebegin", exportBtn);
+      threadFooter.insertAdjacentElement("beforebegin", btnContainer);
     }
   }
 
