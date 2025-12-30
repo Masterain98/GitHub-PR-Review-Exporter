@@ -1,0 +1,11 @@
+# Build output
+GitHub-PR-Review-Exporter.zip
+dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
