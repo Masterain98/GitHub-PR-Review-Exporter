@@ -1041,9 +1041,36 @@
   }
 
   /**
+   * Remove all injected buttons and containers when leaving a PR page
+   */
+  function cleanupButtons() {
+    // Remove sidebar container
+    const sidebarContainer = document.getElementById("pr-exporter-sidebar-container");
+    if (sidebarContainer) sidebarContainer.remove();
+
+    // Remove all export button containers
+    const buttonContainers = document.querySelectorAll(".pr-review-export-container");
+    buttonContainers.forEach((container) => container.remove());
+
+    // Remove individual export buttons that might not be in containers
+    const exportBtns = document.querySelectorAll(".pr-review-export-btn, .pr-review-export-instr-btn");
+    exportBtns.forEach((btn) => btn.remove());
+
+    // Remove any open instruction modal
+    const modal = document.getElementById("pr-instruction-modal");
+    if (modal) modal.remove();
+  }
+
+  /**
    * Find and process all review threads on the page
    */
   function processAllThreads() {
+    // If not on a PR page, clean up any existing buttons and exit
+    if (!isPullRequestPage()) {
+      cleanupButtons();
+      return;
+    }
+
     // Find all thread containers (the outer details elements)
     const threadContainers = document.querySelectorAll(
       "details.js-comment-container, " +
@@ -1098,12 +1125,13 @@
     const mo = new MutationObserver(debouncedProcess);
     mo.observe(document.body, { childList: true, subtree: true });
 
-    // Handle page navigation
+    // Handle page navigation - processAllThreads will check isPullRequestPage()
+    // and clean up if navigated away from a PR page
     window.addEventListener("pjax:end", () => setTimeout(processAllThreads, 100));
     document.addEventListener("turbo:render", () => setTimeout(processAllThreads, 100));
   }
 
-  if (isPullRequestPage()) {
-    observe();
-  }
+  // Run on initial load - observe will set up listeners for future navigations
+  // Even if we start on a non-PR page, we need the observer for SPA navigation
+  observe();
 })();
