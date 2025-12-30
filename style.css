@@ -1,0 +1,19 @@
+.pr-review-copy-btn {
+  margin-left: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 20px;
+  border: 1px solid var(--borderColor-default, #d0d7de);
+  border-radius: 6px;
+  background: var(--bgColor-default, #fff);
+  color: var(--fgColor-default, #24292f);
+  cursor: pointer;
+}
+
+.pr-review-copy-btn:hover {
+  background: var(--bgColor-muted, #f6f8fa);
+}
+
+.pr-review-copy-btn:active {
+  background: var(--bgColor-inset, #eef1f4);
+}
