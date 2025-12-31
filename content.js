@@ -20,6 +20,10 @@
       name: "Copilot",
       buttonLabel: "Export GitHub Copilot Review",
     },
+    "sentry": {
+      name: "Sentry",
+      buttonLabel: "Export Sentry Review",
+    },
   };
 
   function isPullRequestPage() {
@@ -73,6 +77,53 @@
     cleaned = cleaned.replace(/\*\*\s*$/m, "");
 
     return cleaned.trim();
+  }
+
+  /**
+   * Clean up Sentry-specific content patterns
+   * Extracts:
+   * 1. Bug title: "Bug: [description]" + "Severity: [level] | Confidence: [confidence]"
+   * 2. From "Prompt for AI Agent": Location and Potential issue (skipping instruction paragraph)
+   */
+  function cleanSentryContent(text) {
+    let result = [];
+
+    // Extract Bug title
+    // Pattern: **Bug:** [description]
+    const bugTitleMatch = text.match(/\*\*Bug:\*\*\s*(.+?)(?=\n|<sub>|$)/s);
+    if (bugTitleMatch) {
+      result.push("Bug: " + bugTitleMatch[1].trim());
+    }
+
+    // Extract Severity and Confidence
+    // Pattern: Severity: CRITICAL | Confidence: High (may be in <sub> tags)
+    const severityMatch = text.match(/Severity:\s*(\w+)\s*\|\s*Confidence:\s*(\w+)/i);
+    if (severityMatch) {
+      result.push(`Severity: ${severityMatch[1]} | Confidence: ${severityMatch[2]}`);
+    }
+
+    // Extract Location from "Prompt for AI Agent" section
+    // Pattern: Location: [file path]#L[lines]
+    const locationMatch = text.match(/Location:\s*(.+?)(?=\n|Potential issue:|$)/s);
+    if (locationMatch) {
+      result.push("");
+      result.push("Location: " + locationMatch[1].trim());
+    }
+
+    // Extract Potential issue from "Prompt for AI Agent" section
+    // Pattern: Potential issue: [description] (until end of code block or details section)
+    const potentialIssueMatch = text.match(/Potential issue:\s*(.+?)(?=```|<\/details>|Did we get this right|$)/s);
+    if (potentialIssueMatch) {
+      result.push("");
+      result.push("Potential issue: " + potentialIssueMatch[1].trim());
+    }
+
+    // If we extracted something, return it; otherwise return original
+    if (result.length > 0) {
+      return result.join("\n");
+    }
+
+    return text.trim();
   }
 
   /**
@@ -322,6 +373,8 @@
     // Apply bot-specific cleanup
     if (botConfig && botConfig.name === "Codex") {
       body = cleanCodexContent(body);
+    } else if (botConfig && botConfig.name === "Sentry") {
+      body = cleanSentryContent(body);
     }
 
     return body;
