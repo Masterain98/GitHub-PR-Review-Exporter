@@ -955,14 +955,31 @@
   function injectSidebarButton() {
     if (document.getElementById("pr-export-all-reviews-btn")) return;
 
-    // Find the sidebar - look for the right column in PR page
-    const sidebar = document.querySelector(
+    // Find the sidebar - GitHub's layout has changed, try multiple selectors
+    // New GitHub layout uses #partial-discussion-sidebar or #pr-conversation-sidebar
+    // Old layout used .Layout-sidebar or .discussion-sidebar
+    let sidebar = document.querySelector(
+      "#partial-discussion-sidebar, " +
+      "#pr-conversation-sidebar, " +
       ".Layout-sidebar, " +
       ".discussion-sidebar, " +
       "[data-target='pull-request-merge-box-loader.sidebarContainer']"
     );
 
-    if (!sidebar) return;
+    // Fallback: find the parent of .discussion-sidebar-item elements
+    if (!sidebar) {
+      const sidebarItem = document.querySelector(".discussion-sidebar-item");
+      if (sidebarItem) {
+        sidebar = sidebarItem.parentElement;
+        console.log("[PR Copy] Found sidebar via discussion-sidebar-item parent");
+      }
+    }
+
+    if (!sidebar) {
+      console.log("[PR Copy] No sidebar found");
+      return;
+    }
+
 
     // Create container for our buttons
     const container = document.createElement("div");
@@ -1018,13 +1035,26 @@
     if (threadContainer.querySelector(".pr-review-export-btn")) return;
 
     // Find the first comment in this thread to use for content extraction
-    const firstComment = threadContainer.querySelector(
+    // Include selectors for AI bot reviews (Copilot, Codex) which have different structure
+    // Also include selectors for Conversation page which uses different DOM structure
+    let firstComment = threadContainer.querySelector(
       ".timeline-comment.js-comment, " +
       ".review-comment.js-comment, " +
-      ".js-comment[data-gid]"
+      ".js-comment[data-gid], " +
+      ".timeline-comment-group, " +
+      ".js-timeline-comment, " +
+      ".js-comments-holder, " +
+      ".comment-body"
     );
 
-    if (!firstComment) return;
+    // Fallback: if no specific comment found, use the thread container itself
+    // This handles edge cases where the DOM structure is unexpected
+    if (!firstComment) {
+      console.log("[PR Copy] No specific comment element found, using thread container");
+      firstComment = threadContainer;
+    }
+
+
 
     // Detect if this is from an AI bot
     const botConfig = detectAIBot(firstComment);
@@ -1090,6 +1120,36 @@
       btnContainer.appendChild(exportInstrBtn);
 
       threadFooter.insertAdjacentElement("beforebegin", btnContainer);
+      return;
+    }
+
+    // Final fallback: append to thread container or after first comment
+    // This handles AI review threads (Copilot, Codex) that don't have resolve forms
+    console.log("[PR Copy] Using final fallback for button injection");
+    const btnContainer = createButtonContainer();
+    btnContainer.style.marginLeft = "16px";
+    btnContainer.style.marginTop = "8px";
+    btnContainer.style.marginBottom = "8px";
+    btnContainer.style.padding = "8px 0";
+
+    const exportBtn = createExportButton(firstComment, botConfig, false);
+    const exportInstrBtn = createExportButton(firstComment, botConfig, true);
+
+    btnContainer.appendChild(exportBtn);
+    btnContainer.appendChild(exportInstrBtn);
+
+    // Try to find a suitable place to insert
+    // Look for the comment body or actions area
+    const commentBody = firstComment.querySelector(".comment-body, .js-comment-body");
+    const actionsContainer = firstComment.querySelector(".timeline-comment-actions, .js-comment-edit-history");
+
+    if (actionsContainer) {
+      actionsContainer.insertAdjacentElement("afterend", btnContainer);
+    } else if (commentBody) {
+      commentBody.insertAdjacentElement("afterend", btnContainer);
+    } else {
+      // Last resort: append to first comment
+      firstComment.appendChild(btnContainer);
     }
   }
 
@@ -1125,11 +1185,15 @@
     }
 
     // Find all thread containers (the outer details elements)
+    // Include selectors for Conversation page (TimelineItem) and Files page (review-thread-component)
     const threadContainers = document.querySelectorAll(
       "details.js-comment-container, " +
       ".review-thread-component, " +
-      ".js-resolvable-timeline-thread-container"
+      ".js-resolvable-timeline-thread-container, " +
+      ".js-timeline-item[id*='pullrequestreview'], " +
+      ".TimelineItem:has(.comment-body)"
     );
+
 
     threadContainers.forEach((container) => {
       injectButtonsIntoThread(container);
