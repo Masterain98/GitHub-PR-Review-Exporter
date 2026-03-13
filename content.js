@@ -34,7 +34,7 @@
    * Detect which AI bot authored the comment (if any)
    */
   function detectAIBot(commentEl) {
-    // Look for author link in the comment header
+    // Look for author link in the comment header (old GitHub layout)
     const authorLink = commentEl.querySelector(
       ".author, a[data-hovercard-type='user'], .timeline-comment-header a"
     );
@@ -49,6 +49,35 @@
         }
       }
     }
+
+    // New Copilot AutomatedReviewThreadComment structure (React-based)
+    const authorNameEl = commentEl.querySelector('[class*="AuthorName"]');
+    if (authorNameEl) {
+      const name = (authorNameEl.textContent || "").trim().toLowerCase();
+      for (const [botUsername, botConfig] of Object.entries(AI_BOTS)) {
+        if (name.includes(botUsername)) {
+          console.log("[PR Copy] Detected AI bot (new layout):", botConfig.name);
+          return botConfig;
+        }
+      }
+    }
+
+    // Also check for links to known bot app pages
+    const appLinks = commentEl.querySelectorAll('a[href*="/apps/"]');
+    for (const link of appLinks) {
+      const href = (link.getAttribute("href") || "").toLowerCase();
+      if (href.includes("copilot")) {
+        console.log("[PR Copy] Detected Copilot via app link");
+        return AI_BOTS["copilot"];
+      }
+      for (const [botUsername, botConfig] of Object.entries(AI_BOTS)) {
+        if (href.includes(botUsername)) {
+          console.log("[PR Copy] Detected AI bot via app link:", botConfig.name);
+          return botConfig;
+        }
+      }
+    }
+
     return null;
   }
 
@@ -323,10 +352,14 @@
     }
 
     // Method 3: Build content from rendered body + suggestion blocks
+    // Also support new Copilot AutomatedReviewThreadComment layout
     const bodyEl =
       commentEl.querySelector(".comment-body.markdown-body") ||
       commentEl.querySelector(".comment-body") ||
-      commentEl.querySelector(".js-comment-body");
+      commentEl.querySelector(".js-comment-body") ||
+      commentEl.querySelector('[class*="automatedComment__body"] .markdown-body') ||
+      commentEl.querySelector('[class*="automatedComment__content"] .markdown-body') ||
+      commentEl.querySelector('.markdown-body');
 
     if (bodyEl) {
       // Clone the element to manipulate without affecting the page
@@ -365,6 +398,53 @@
   }
 
   /**
+   * Detect priority/severity level from comment
+   * - Copilot (new layout): reads from BadgesGroupContainer label (High, Medium, Low, Critical)
+   * - Codex: reads from P0/P1/P2 badge image alt text
+   */
+  function detectPriority(commentEl, botConfig) {
+    // Copilot new automated review layout: priority badge in header
+    const badgesGroup = commentEl.querySelector('[class*="BadgesGroupContainer"]');
+    if (badgesGroup) {
+      const labels = badgesGroup.querySelectorAll('[class*="Label"]');
+      for (const label of labels) {
+        const text = (label.textContent || "").trim();
+        if (/^(Critical|High|Medium|Low)$/i.test(text)) {
+          console.log("[PR Copy] Detected Copilot priority:", text);
+          return text;
+        }
+      }
+    }
+
+    // Codex: P0/P1/P2/P3 badge image with alt text like "P1 Badge"
+    const badgeImgs = commentEl.querySelectorAll('img[alt*="Badge"]');
+    for (const img of badgeImgs) {
+      const alt = img.alt || "";
+      const match = alt.match(/P(\d+)\s*Badge/i);
+      if (match) {
+        console.log("[PR Copy] Detected Codex priority: P" + match[1]);
+        return "P" + match[1];
+      }
+    }
+
+    // Codex fallback: check raw markdown for badge URL pattern
+    // e.g. ![P1](https://img.shields.io/badge/P1-orange?style=flat)
+    const editForm = commentEl.querySelector("form.js-comment-edit-form");
+    if (editForm) {
+      const textarea = editForm.querySelector("textarea");
+      if (textarea && textarea.value) {
+        const urlMatch = textarea.value.match(/badge\/P(\d+)/i);
+        if (urlMatch) {
+          console.log("[PR Copy] Detected Codex priority from markdown: P" + urlMatch[1]);
+          return "P" + urlMatch[1];
+        }
+      }
+    }
+
+    return "";
+  }
+
+  /**
    * Get comment body with bot-specific cleanup
    */
   function getCleanedCommentBody(commentEl, botConfig) {
@@ -386,13 +466,15 @@
   function buildCopyText(commentEl, botConfig) {
     const filePath = findFilePath(commentEl);
     const lineInfo = findLineInfoText(commentEl);
+    const priority = detectPriority(commentEl, botConfig);
     const rawBody = getCleanedCommentBody(commentEl, botConfig);
 
     const parts = [];
 
     if (filePath) parts.push(filePath);
     if (lineInfo) parts.push(lineInfo);
-    if (filePath || lineInfo) parts.push(""); // blank line after header
+    if (priority) parts.push("Priority: " + priority);
+    if (filePath || lineInfo || priority) parts.push(""); // blank line after header
 
     if (rawBody) parts.push(rawBody);
 
@@ -408,6 +490,9 @@
    */
   async function getInstruction() {
     try {
+      if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.sync) {
+        return "";
+      }
       const result = await chrome.storage.sync.get(["customInstruction"]);
       return result.customInstruction || "";
     } catch (err) {
@@ -459,69 +544,217 @@
   }
 
   /**
-   * Create the export button with GitHub Primer-like styling
+   * Ensure shared styles for the thread export dropdown are present.
    */
-  function createExportButton(commentEl, botConfig, includeInstruction = false) {
-    const btn = document.createElement("button");
-    btn.className = includeInstruction ? "pr-review-export-instr-btn" : "pr-review-export-btn";
-    btn.type = "button";
+  function ensureThreadExportStyles() {
+    if (document.getElementById("pr-review-export-styles")) return;
 
-    // Determine label
-    let defaultLabel;
+    const style = document.createElement("style");
+    style.id = "pr-review-export-styles";
+    style.textContent = `
+      .pr-review-export-container {
+        position: relative;
+        display: inline-block;
+      }
+
+      .pr-review-export-trigger::-webkit-details-marker {
+        display: none;
+      }
+
+      .pr-review-export-trigger::marker {
+        content: "";
+      }
+
+      .pr-review-export-trigger {
+        list-style: none;
+      }
+
+      .pr-review-export-trigger.pr-review-export-trigger--header {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 6px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--color-fg-muted, #656d76);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .pr-review-export-trigger.pr-review-export-trigger--header:hover {
+        background: var(--color-neutral-muted, rgba(175, 184, 193, 0.2));
+        color: var(--color-fg-default, #24292f);
+      }
+
+      .pr-review-export-container[open] .pr-review-export-trigger {
+        background-color: var(--color-neutral-muted, rgba(175, 184, 193, 0.2)) !important;
+        border-color: var(--color-border-default, rgba(31, 35, 40, 0.15)) !important;
+      }
+
+      .pr-review-export-container[open] .pr-review-export-trigger.pr-review-export-trigger--header {
+        border-color: transparent !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  /**
+   * Copy a single review thread to clipboard.
+   */
+  async function exportReviewToClipboard(commentEl, botConfig, includeInstruction = false) {
+    let text = buildCopyText(commentEl, botConfig);
+
     if (includeInstruction) {
-      defaultLabel = "Export Instruction & Review";
-    } else {
-      defaultLabel = botConfig ? botConfig.buttonLabel : "Export Review";
+      const instruction = await getInstruction();
+      if (instruction) {
+        text = instruction + "\n\n" + text;
+      }
     }
-    btn.textContent = defaultLabel;
 
-    // Apply Primer-compatible styles
+    await navigator.clipboard.writeText(text);
+  }
+
+  /**
+   * Create a compact export dropdown for a single thread.
+   */
+  function createThreadExportControl(commentEl, botConfig, variant = "header") {
+    ensureThreadExportStyles();
+
     const styles = getButtonStyles();
-    btn.style.cssText = styles.base + styles.secondary;
+    const details = document.createElement("details");
+    details.className = "pr-review-export-container";
 
-    // Hover effects
-    btn.addEventListener("mouseenter", () => {
-      btn.style.cssText = styles.base + styles.secondaryHover;
+    const summary = document.createElement("summary");
+    summary.className = `pr-review-export-trigger pr-review-export-trigger--${variant}`;
+    summary.textContent = "Export";
+
+    const summaryBaseStyle = variant === "header"
+      ? `
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      `
+      : styles.base + styles.secondary + `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding-right: 10px;
+        white-space: nowrap;
+      `;
+
+    const summaryHoverStyle = variant === "header"
+      ? `
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      `
+      : styles.base + styles.secondaryHover + `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding-right: 10px;
+        white-space: nowrap;
+      `;
+
+    summary.style.cssText = summaryBaseStyle;
+    summary.insertAdjacentHTML(
+      "beforeend",
+      '<svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" style="fill: currentColor;"><path d="M4.427 6.427a.75.75 0 0 1 1.06 0L8 8.94l2.513-2.513a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.427 7.487a.75.75 0 0 1 0-1.06Z"></path></svg>'
+    );
+
+    summary.addEventListener("mouseenter", () => {
+      summary.style.cssText = summaryHoverStyle;
     });
-    btn.addEventListener("mouseleave", () => {
-      btn.style.cssText = styles.base + styles.secondary;
+    summary.addEventListener("mouseleave", () => {
+      summary.style.cssText = summaryBaseStyle;
     });
 
-    btn.addEventListener("click", async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const menu = document.createElement("div");
+    menu.className = "pr-review-export-menu";
+    menu.style.cssText = `
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 220px;
+      padding: 6px;
+      background: var(--color-canvas-overlay, #ffffff);
+      border: 1px solid var(--color-border-default, rgba(31, 35, 40, 0.15));
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(140, 149, 159, 0.2);
+      z-index: 1000;
+    `;
 
-      btn.textContent = "Exporting...";
-      btn.disabled = true;
+    const createMenuItem = (label, includeInstruction) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "pr-review-export-menu-item";
+      item.textContent = label;
+      item.style.cssText = `
+        display: block;
+        width: 100%;
+        padding: 7px 10px;
+        margin: 0;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.4;
+        text-align: left;
+        cursor: pointer;
+      `;
 
-      let text = buildCopyText(commentEl, botConfig);
+      item.addEventListener("mouseenter", () => {
+        item.style.background = "var(--color-neutral-muted, rgba(175, 184, 193, 0.2))";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.background = "transparent";
+      });
 
-      // Prepend instruction if requested
-      if (includeInstruction) {
-        const instruction = await getInstruction();
-        if (instruction) {
-          text = instruction + "\n\n" + text;
+      item.addEventListener("click", async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const defaultLabel = "Export";
+        summary.textContent = "Copying...";
+        summary.style.pointerEvents = "none";
+
+        try {
+          await exportReviewToClipboard(commentEl, botConfig, includeInstruction);
+          summary.textContent = "Copied";
+        } catch (err) {
+          console.error("Clipboard write failed:", err);
+          summary.textContent = "Failed";
         }
-      }
 
-      try {
-        await navigator.clipboard.writeText(text);
-        btn.textContent = "✓ Exported!";
+        details.removeAttribute("open");
         setTimeout(() => {
-          btn.textContent = defaultLabel;
-          btn.disabled = false;
-        }, 1500);
-      } catch (err) {
-        console.error("Clipboard write failed:", err);
-        btn.textContent = "Failed";
-        setTimeout(() => {
-          btn.textContent = defaultLabel;
-          btn.disabled = false;
-        }, 1500);
-      }
-    });
+          summary.textContent = defaultLabel;
+          summary.insertAdjacentHTML(
+            "beforeend",
+            '<svg aria-hidden="true" viewBox="0 0 16 16" width="12" height="12" style="fill: currentColor;"><path d="M4.427 6.427a.75.75 0 0 1 1.06 0L8 8.94l2.513-2.513a.75.75 0 1 1 1.06 1.06L8.53 10.53a.75.75 0 0 1-1.06 0L4.427 7.487a.75.75 0 0 1 0-1.06Z"></path></svg>'
+          );
+          summary.style.cssText = summaryBaseStyle;
+          summary.style.pointerEvents = "";
+        }, 1200);
+      });
 
-    return btn;
+      return item;
+    };
+
+    menu.appendChild(createMenuItem(botConfig ? botConfig.buttonLabel : "Export Review", false));
+    menu.appendChild(createMenuItem("Export Instruction & Review", true));
+
+    details.appendChild(summary);
+    details.appendChild(menu);
+
+    return details;
   }
 
   /**
@@ -563,7 +796,10 @@
       const firstComment = container.querySelector(
         ".timeline-comment.js-comment, " +
         ".review-comment.js-comment, " +
-        ".js-comment[data-gid]"
+        ".js-comment[data-gid], " +
+        ".js-comments-holder, " +
+        ".comment-body, " +
+        '[class*="AutomatedReviewThreadComment"]'
       );
 
       if (firstComment) {
@@ -581,6 +817,59 @@
   /**
    * Create the sidebar export all button
    */
+  function createMarkAllResolvedButton() {
+    const btn = document.createElement("button");
+    btn.id = "pr-mark-all-resolved-btn";
+    btn.className = "btn btn-sm btn-block";
+    btn.type = "button";
+    btn.textContent = "Mark all Reviews as Resolved";
+    btn.style.cssText = `
+      width: 100%;
+      margin-top: 8px;
+      background: #1f6feb;
+      border: 1px solid #1f6feb;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    `;
+
+    btn.addEventListener("mouseenter", () => {
+      btn.style.background = "#388bfd";
+    });
+    btn.addEventListener("mouseleave", () => {
+      btn.style.background = "#1f6feb";
+    });
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const resolveForms = document.querySelectorAll(
+        ".js-resolvable-timeline-thread-form"
+      );
+      let clicked = 0;
+      resolveForms.forEach((form) => {
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn && !submitBtn.disabled) {
+          submitBtn.click();
+          clicked++;
+        }
+      });
+
+      btn.textContent = clicked > 0 ? `✓ Resolved ${clicked} threads` : "Nothing to resolve";
+      btn.disabled = true;
+      setTimeout(() => {
+        btn.textContent = "Mark all Reviews as Resolved";
+        btn.disabled = false;
+      }, 3000);
+    });
+
+    return btn;
+  }
+
   function createSidebarExportButton() {
     const btn = document.createElement("button");
     btn.id = "pr-export-all-reviews-btn";
@@ -657,7 +946,8 @@
 1. Assess if the concern is valid and applicable
 2. If valid, analyze the suggested fix or solution
 3. Decide whether to adopt, modify, or reject the suggestion
-4. Provide your reasoning and any code changes if applicable`;
+4. Provide your reasoning and any code changes if applicable
+5. If you are unsure about the business logic or design intent, ask me clarifying questions before proceeding`;
 
   /**
    * Detect if GitHub is in dark mode
@@ -996,6 +1286,10 @@
     exportBtn.style.marginTop = "8px";
     container.appendChild(exportBtn);
 
+    // Add Mark all as Resolved button
+    const markAllBtn = createMarkAllResolvedButton();
+    container.appendChild(markAllBtn);
+
     // Find a good place to insert - after the last section
     const sections = sidebar.querySelectorAll(".discussion-sidebar-item");
     const lastSection = sections[sections.length - 1];
@@ -1013,16 +1307,41 @@
    */
   function createButtonContainer() {
     const container = document.createElement("div");
-    container.className = "pr-review-export-container";
+    container.className = "pr-review-export-row";
     container.style.cssText = `
-      display: inline-flex;
-      flex-wrap: wrap;
+      display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 8px;
-      margin-left: 8px;
-      vertical-align: middle;
+      width: 100%;
+      box-sizing: border-box;
     `;
     return container;
+  }
+
+  /**
+   * Try to mount the export control into a native header action cluster.
+   */
+  function mountExportControlInHeader(threadContainer, firstComment, exportControl) {
+    const oldActionGroup = firstComment.querySelector(".timeline-comment-actions");
+    if (oldActionGroup && oldActionGroup.parentElement) {
+      // Old GitHub comment headers use flex-row-reverse, so DOM order is inverted.
+      // Insert after the kebab group in the DOM so Export appears to its left visually.
+      exportControl.style.marginRight = "10px";
+      oldActionGroup.insertAdjacentElement("afterend", exportControl);
+      return true;
+    }
+
+    const newActionGroup = threadContainer.querySelector(
+      '[data-testid="comment-header"] [class*="ActionsButtonsContainer"]'
+    );
+    if (newActionGroup) {
+      exportControl.style.marginRight = "10px";
+      newActionGroup.insertBefore(exportControl, newActionGroup.firstChild);
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -1032,7 +1351,17 @@
    */
   function injectButtonsIntoThread(threadContainer) {
     if (!threadContainer) return;
-    if (threadContainer.querySelector(".pr-review-export-btn")) return;
+    if (threadContainer.querySelector(".pr-review-export-container")) return;
+
+    // Skip the PR author's main description comment — it's a .TimelineItem but
+    // NOT inside a pullrequestreview block and has no resolve form.
+    if (
+      threadContainer.classList.contains("TimelineItem") &&
+      !threadContainer.closest('[id*="pullrequestreview"]') &&
+      !threadContainer.querySelector(".js-resolvable-timeline-thread-form")
+    ) {
+      return;
+    }
 
     // Find the first comment in this thread to use for content extraction
     // Include selectors for AI bot reviews (Copilot, Codex) which have different structure
@@ -1066,36 +1395,32 @@
     );
 
     if (resolveForm) {
-      // Create button container for responsive layout
-      const btnContainer = createButtonContainer();
+      const exportControl = createThreadExportControl(firstComment, botConfig, "header");
 
-      // Create both buttons
-      const exportBtn = createExportButton(firstComment, botConfig, false);
-      const exportInstrBtn = createExportButton(firstComment, botConfig, true);
+      if (mountExportControlInHeader(threadContainer, firstComment, exportControl)) {
+        return;
+      }
 
-      btnContainer.appendChild(exportBtn);
-      btnContainer.appendChild(exportInstrBtn);
-
-      // Insert container after the resolve form
-      resolveForm.insertAdjacentElement("afterend", btnContainer);
-
-      // Apply minimal flex styling to parent for proper alignment
-      // Use CSS that doesn't destructively override existing styles
-      const parent = resolveForm.parentElement;
-      if (parent) {
-        const currentDisplay = window.getComputedStyle(parent).display;
-        // Only modify if it's block-level, preserve existing flex layouts
-        if (currentDisplay === "block" || currentDisplay === "inline") {
-          parent.style.display = "flex";
-          parent.style.flexWrap = "wrap";
-          parent.style.alignItems = "center";
-          parent.style.gap = "8px";
-        } else if (currentDisplay === "flex" || currentDisplay === "inline-flex") {
-          // Already flex, just ensure wrap is enabled
-          if (!parent.style.flexWrap) {
-            parent.style.flexWrap = "wrap";
-          }
-        }
+      // If the resolve form is inside the comment header row, adding buttons there
+      // makes the header row taller. Instead, insert a dedicated row after the header.
+      const headerEl = resolveForm.closest(".timeline-comment-header");
+      if (headerEl) {
+        const btnRow = document.createElement("div");
+        btnRow.className = "pr-review-export-row";
+        btnRow.style.cssText = `
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          padding: 6px 8px 0 8px;
+        `;
+        btnRow.appendChild(exportControl);
+        headerEl.insertAdjacentElement("afterend", btnRow);
+      } else {
+        // No header ancestor — insert inline after the resolve form
+        const btnContainer = createButtonContainer();
+        btnContainer.style.marginTop = "8px";
+        btnContainer.appendChild(createThreadExportControl(firstComment, botConfig, "panel"));
+        resolveForm.insertAdjacentElement("afterend", btnContainer);
       }
       return;
     }
@@ -1109,46 +1434,57 @@
     if (threadFooter) {
       // Create button container
       const btnContainer = createButtonContainer();
-      btnContainer.style.marginLeft = "16px";
-      btnContainer.style.marginTop = "8px";
-      btnContainer.style.marginBottom = "8px";
+      btnContainer.style.padding = "8px 0 0 0";
 
-      const exportBtn = createExportButton(firstComment, botConfig, false);
-      const exportInstrBtn = createExportButton(firstComment, botConfig, true);
+      const exportControl = createThreadExportControl(firstComment, botConfig, "header");
 
-      btnContainer.appendChild(exportBtn);
-      btnContainer.appendChild(exportInstrBtn);
+      if (mountExportControlInHeader(threadContainer, firstComment, exportControl)) {
+        return;
+      }
+
+      btnContainer.appendChild(createThreadExportControl(firstComment, botConfig, "panel"));
 
       threadFooter.insertAdjacentElement("beforebegin", btnContainer);
       return;
     }
 
-    // Final fallback: append to thread container or after first comment
-    // This handles AI review threads (Copilot, Codex) that don't have resolve forms
+    // Final fallback: handles AI review threads (Copilot, Codex) that don't have resolve forms
     console.log("[PR Copy] Using final fallback for button injection");
+
+    const exportControl = createThreadExportControl(firstComment, botConfig, "header");
+
+    if (mountExportControlInHeader(threadContainer, firstComment, exportControl)) {
+      return;
+    }
+
+    // If the thread has a .timeline-comment-header (Codex, Sentry, old-layout bots),
+    // inserting inside that header row makes it taller. Insert a dedicated row after it.
+    const commentHeader = firstComment.querySelector(".timeline-comment-header");
+    if (commentHeader) {
+      const btnRow = document.createElement("div");
+      btnRow.className = "pr-review-export-row";
+      btnRow.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 6px 12px 0 12px;
+      `;
+      btnRow.appendChild(createThreadExportControl(firstComment, botConfig, "panel"));
+      commentHeader.insertAdjacentElement("afterend", btnRow);
+      return;
+    }
+
+    // For new-layout bots (e.g. new Copilot React layout) that have no header row,
+    // append after the comment body element.
     const btnContainer = createButtonContainer();
-    btnContainer.style.marginLeft = "16px";
-    btnContainer.style.marginTop = "8px";
-    btnContainer.style.marginBottom = "8px";
-    btnContainer.style.padding = "8px 0";
+    btnContainer.style.padding = "8px 0 0 0";
 
-    const exportBtn = createExportButton(firstComment, botConfig, false);
-    const exportInstrBtn = createExportButton(firstComment, botConfig, true);
+    btnContainer.appendChild(createThreadExportControl(firstComment, botConfig, "panel"));
 
-    btnContainer.appendChild(exportBtn);
-    btnContainer.appendChild(exportInstrBtn);
-
-    // Try to find a suitable place to insert
-    // Look for the comment body or actions area
     const commentBody = firstComment.querySelector(".comment-body, .js-comment-body");
-    const actionsContainer = firstComment.querySelector(".timeline-comment-actions, .js-comment-edit-history");
-
-    if (actionsContainer) {
-      actionsContainer.insertAdjacentElement("afterend", btnContainer);
-    } else if (commentBody) {
+    if (commentBody) {
       commentBody.insertAdjacentElement("afterend", btnContainer);
     } else {
-      // Last resort: append to first comment
       firstComment.appendChild(btnContainer);
     }
   }
@@ -1162,16 +1498,35 @@
     if (sidebarContainer) sidebarContainer.remove();
 
     // Remove all export button containers
-    const buttonContainers = document.querySelectorAll(".pr-review-export-container");
+    const buttonContainers = document.querySelectorAll(".pr-review-export-container, .pr-review-export-row");
     buttonContainers.forEach((container) => container.remove());
 
-    // Remove individual export buttons that might not be in containers
-    const exportBtns = document.querySelectorAll(".pr-review-export-btn, .pr-review-export-instr-btn");
+    // Remove individual export controls that might not be in containers
+    const exportBtns = document.querySelectorAll(".pr-review-export-trigger, .pr-review-export-menu-item");
     exportBtns.forEach((btn) => btn.remove());
 
     // Remove any open instruction modal
     const modal = document.getElementById("pr-instruction-modal");
     if (modal) modal.remove();
+  }
+
+  /**
+   * Auto-expand hidden conversations.
+   * GitHub collapses some inline threads behind a "N hidden conversation(s)" submit
+   * button inside a form.js-review-hidden-comment-ids (ajax-pagination-form).
+   * We click each such button once and mark the form so we don't re-trigger it.
+   */
+  function expandHiddenConversations() {
+    const forms = document.querySelectorAll(
+      "form.js-review-hidden-comment-ids:not([data-pr-copy-expanded])"
+    );
+    forms.forEach((form) => {
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        form.setAttribute("data-pr-copy-expanded", "true");
+        btn.click();
+      }
+    });
   }
 
   /**
@@ -1183,6 +1538,9 @@
       cleanupButtons();
       return;
     }
+
+    // Expand any hidden conversations first so they are visible for processing
+    expandHiddenConversations();
 
     // Find all thread containers (the outer details elements)
     // Include selectors for Conversation page (TimelineItem) and Files page (review-thread-component)
@@ -1205,7 +1563,7 @@
       const parentThread = container.closest(
         "details.js-comment-container, .review-thread-component"
       );
-      if (parentThread && !parentThread.querySelector(".pr-review-export-btn")) {
+      if (parentThread && !parentThread.querySelector(".pr-review-export-container")) {
         injectButtonsIntoThread(parentThread);
       }
     });

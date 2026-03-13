@@ -8,7 +8,8 @@ const DEFAULT_INSTRUCTION = `Please review the following code review comments. F
 1. Assess if the concern is valid and applicable
 2. If valid, analyze the suggested fix or solution
 3. Decide whether to adopt, modify, or reject the suggestion
-4. Provide your reasoning and any code changes if applicable`;
+4. Provide your reasoning and any code changes if applicable
+5. If you are unsure about the business logic or design intent, ask me clarifying questions before proceeding`;
 
 const instructionTextarea = document.getElementById("instruction");
 const charCountSpan = document.getElementById("charCount");
