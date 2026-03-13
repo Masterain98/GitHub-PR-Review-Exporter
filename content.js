@@ -124,12 +124,8 @@
       result.push("Bug: " + bugTitleMatch[1].trim());
     }
 
-    // Extract Severity and Confidence
-    // Pattern: Severity: CRITICAL | Confidence: High (may be in <sub> tags)
-    const severityMatch = text.match(/Severity:\s*(\w+)\s*\|\s*Confidence:\s*(\w+)/i);
-    if (severityMatch) {
-      result.push(`Severity: ${severityMatch[1]} | Confidence: ${severityMatch[2]}`);
-    }
+    // Severity is already surfaced as "Priority:" in the copy header via detectPriority(),
+    // so we intentionally skip it here to avoid duplication.
 
     // Extract Location from "Prompt for AI Agent" section
     // Pattern: Location: [file path]#L[lines]
@@ -437,6 +433,18 @@
         if (urlMatch) {
           console.log("[PR Copy] Detected Codex priority from markdown: P" + urlMatch[1]);
           return "P" + urlMatch[1];
+        }
+      }
+    }
+
+    // Sentry: severity from rendered comment body text (e.g. "Severity: HIGH")
+    if (botConfig && botConfig.name === "Sentry") {
+      const bodyEl = commentEl.querySelector(".comment-body, .js-comment-body");
+      if (bodyEl) {
+        const match = (bodyEl.textContent || "").match(/Severity:\s*(CRITICAL|HIGH|MEDIUM|LOW|WARNING)\b/i);
+        if (match) {
+          console.log("[PR Copy] Detected Sentry severity:", match[1]);
+          return match[1].toUpperCase();
         }
       }
     }
