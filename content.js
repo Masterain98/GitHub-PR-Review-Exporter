@@ -1323,6 +1323,26 @@
    * Try to mount the export control into a native header action cluster.
    */
   function mountExportControlInHeader(threadContainer, firstComment, exportControl) {
+    const automatedRoot =
+      firstComment?.matches?.(
+        '[data-testid="automated-review-comment"], [class*="AutomatedReviewThreadComment-module__automatedComment__"]'
+      )
+        ? firstComment
+        : threadContainer.querySelector(
+          '[data-testid="automated-review-comment"], [class*="AutomatedReviewThreadComment-module__automatedComment__"]'
+        );
+
+    const automatedActions = automatedRoot?.querySelector('[class*="ActionsContainer"]');
+    if (automatedActions) {
+      exportControl.style.margin = "0 12px 0 0";
+      exportControl.style.flex = "0 0 auto";
+
+      // Put Export at the far left of Copilot's action rail, before all native items
+      // including priority badges and the kebab menu.
+      automatedActions.insertBefore(exportControl, automatedActions.firstChild);
+      return true;
+    }
+
     const oldActionGroup = firstComment.querySelector(".timeline-comment-actions");
     if (oldActionGroup && oldActionGroup.parentElement) {
       // Old GitHub comment headers use flex-row-reverse, so DOM order is inverted.
@@ -1342,6 +1362,84 @@
     }
 
     return false;
+  }
+
+  /**
+   * Mount the export control into the resolve footer row for inline threads.
+   */
+  function mountExportControlInResolveRow(resolveForm, exportControl) {
+    if (!resolveForm || !resolveForm.parentElement) return false;
+
+    const originalParent = resolveForm.parentElement;
+
+    const row = document.createElement("div");
+    row.className = "pr-review-export-row";
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 8px;
+      width: 100%;
+    `;
+
+    const left = document.createElement("div");
+    left.style.cssText = `
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      flex: 1 1 auto;
+    `;
+    left.appendChild(exportControl);
+
+    const right = document.createElement("div");
+    right.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex: 0 0 auto;
+    `;
+    right.appendChild(resolveForm);
+
+    row.appendChild(left);
+    row.appendChild(right);
+    originalParent.appendChild(row);
+    return true;
+  }
+
+  /**
+   * Mount the export control into the file-path summary row at the top of the thread.
+   * The <summary> element shows the file name and has empty space on its right side.
+   * Stops click propagation so the Export dropdown doesn't toggle the thread open/closed.
+   */
+  function mountExportControlInSummary(threadContainer, exportControl) {
+    const summaryEl = threadContainer.querySelector(
+      ":scope > summary.js-toggle-outdated-comments, :scope > summary"
+    );
+    if (!summaryEl) return false;
+
+    const flexRow = summaryEl.querySelector(".d-flex.flex-items-center");
+    if (!flexRow) {
+      // Summary exists but its inner row isn't rendered yet (GitHub lazy-loads active threads).
+      // Return true to block any fallback injection in the wrong place.
+      // The MutationObserver will retry injectButtonsIntoThread once the DOM updates,
+      // and at that point the guard (no .pr-review-export-container yet) will let it through.
+      return true;
+    }
+
+    // Prevent clicks on the Export dropdown from toggling the parent <details> thread
+    exportControl.addEventListener("click", (e) => e.stopPropagation());
+
+    // Insert Export before the Show/Hide resolved links so it sits right of the file path
+    const showHideBtn = flexRow.querySelector(".Details-content--closed, .Details-content--open");
+    if (showHideBtn) {
+      exportControl.style.marginRight = "8px";
+      flexRow.insertBefore(exportControl, showHideBtn);
+    } else {
+      flexRow.appendChild(exportControl);
+    }
+
+    return true;
   }
 
   /**
@@ -1367,14 +1465,20 @@
     // Include selectors for AI bot reviews (Copilot, Codex) which have different structure
     // Also include selectors for Conversation page which uses different DOM structure
     let firstComment = threadContainer.querySelector(
-      ".timeline-comment.js-comment, " +
-      ".review-comment.js-comment, " +
-      ".js-comment[data-gid], " +
-      ".timeline-comment-group, " +
-      ".js-timeline-comment, " +
-      ".js-comments-holder, " +
-      ".comment-body"
+      '[data-testid="automated-review-comment"], [class*="AutomatedReviewThreadComment-module__automatedComment__"]'
     );
+
+    if (!firstComment) {
+      firstComment = threadContainer.querySelector(
+        ".timeline-comment.js-comment, " +
+        ".review-comment.js-comment, " +
+        ".js-comment[data-gid], " +
+        ".timeline-comment-group, " +
+        ".js-timeline-comment, " +
+        ".js-comments-holder, " +
+        ".comment-body"
+      );
+    }
 
     // Fallback: if no specific comment found, use the thread container itself
     // This handles edge cases where the DOM structure is unexpected
@@ -1388,6 +1492,12 @@
     // Detect if this is from an AI bot
     const botConfig = detectAIBot(firstComment);
 
+    // Primary: place Export in the file-path summary row (universal — works for all thread types)
+    const exportControlForSummary = createThreadExportControl(firstComment, botConfig, "header");
+    if (mountExportControlInSummary(threadContainer, exportControlForSummary)) {
+      return;
+    }
+
     // Find the Resolve conversation form
     const resolveForm = threadContainer.querySelector(
       ".js-resolvable-timeline-thread-form, " +
@@ -1398,6 +1508,10 @@
       const exportControl = createThreadExportControl(firstComment, botConfig, "header");
 
       if (mountExportControlInHeader(threadContainer, firstComment, exportControl)) {
+        return;
+      }
+
+      if (mountExportControlInResolveRow(resolveForm, exportControl)) {
         return;
       }
 
@@ -1587,7 +1701,12 @@
    * Set up observer for dynamic content
    */
   function observe() {
-    if (document.documentElement.hasAttribute(EXT_MARK)) return;
+    // If the mark is already set, a previous inject (e.g., after extension reload)
+    // left stale buttons in the DOM. Clean them up and re-initialise.
+    if (document.documentElement.hasAttribute(EXT_MARK)) {
+      cleanupButtons();
+      document.documentElement.removeAttribute(EXT_MARK);
+    }
     document.documentElement.setAttribute(EXT_MARK, "true");
 
     // Initial processing - run immediately
