@@ -855,6 +855,14 @@
       e.preventDefault();
       e.stopPropagation();
 
+      const pendingCount = document.querySelectorAll(
+        ".js-resolvable-timeline-thread-form button[type='submit']:not(:disabled)"
+      ).length;
+      const confirmMsg = pendingCount > 0
+        ? `Resolve all ${pendingCount} conversation${pendingCount > 1 ? "s" : ""}?`
+        : "No unresolved conversations found. Proceed anyway?";
+      if (!window.confirm(confirmMsg)) return;
+
       const resolveForms = document.querySelectorAll(
         ".js-resolvable-timeline-thread-form"
       );
