@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LLM-Ready GitHub PR Review Exporter",
   "version": "1.1.0",
-  "description": "Without MCP support. Export GitHub PR review comments with file paths, line numbers, and code suggestions. Customize with AI-assisted review prompts.",
+  "description": "Export GitHub PR review comments with file paths, line numbers, and code suggestions. Customize with AI-assisted review prompts.",
   "permissions": [
     "clipboardWrite",
     "storage"
