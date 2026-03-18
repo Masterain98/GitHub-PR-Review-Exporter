@@ -24,6 +24,10 @@
       name: "Sentry",
       buttonLabel: "Export Sentry Review",
     },
+    "coderabbitai": {
+      name: "CodeRabbit",
+      buttonLabel: "Export CodeRabbit Review",
+    },
   };
 
   function isPullRequestPage() {
@@ -149,6 +153,60 @@
     }
 
     return text.trim();
+  }
+
+  /**
+   * Clean up CodeRabbit-specific content patterns.
+   * Extracts the meaningful review content from CodeRabbit's inline comments:
+   * - Removes the category/severity first line (surfaced via detectPriority)
+   * - Removes collapsed section labels (建议修改, Committable suggestion, Prompt for AI Agents, Analysis chain)
+   * - Keeps the title, description, and "Also applies to" references
+   */
+  function cleanCodeRabbitContent(text) {
+    let cleaned = text;
+
+    // Remove severity/category header line (e.g. "⚠️ Potential issue | 🟡 Minor")
+    cleaned = cleaned.replace(/^[^\n]*(?:Potential issue|Verification successful|Nitpick|Praise)[^\n]*\n?/m, "");
+
+    // Remove Analysis chain label line (when section is closed)
+    cleaned = cleaned.replace(/^\s*🧩\s*Analysis chain\s*\n?/m, "");
+    // Remove Analysis chain bash script blocks (when section was expanded):
+    // Each block runs from "🏁 Script executed:" to "Length of output: N"
+    cleaned = cleaned.replace(/🏁\s*Script executed:[\s\S]*?Length of output:\s*\d+\s*\n?/g, "");
+    // Remove "Repository: owner/repo" lines that accompany script block output
+    cleaned = cleaned.replace(/^Repository:\s*\S+\s*\n?/gm, "");
+
+    // Remove 建议修改 label only — preserve any diff content that follows
+    cleaned = cleaned.replace(/^\s*🛠️?\s*建议修改\s*\n?/m, "");
+    cleaned = cleaned.replace(/^\s*建议修改\s*\n?/m, "");
+
+    // Cut from "📝 Committable suggestion" to end of text
+    // (verbose duplicate of the suggestion diff, not needed)
+    cleaned = cleaned.replace(/\n?\s*📝\s*Committable suggestion[\s\S]*/g, "");
+
+    // Cut from "🤖 Prompt for AI Agents" to end of text (label + its content)
+    // Must cut label+content together so the content doesn't leak when label is matched first
+    cleaned = cleaned.replace(/\n?\s*🤖\s*Prompt for AI Agents[\s\S]*/g, "");
+
+    // Remove CodeRabbit boilerplate footer
+    cleaned = cleaned.replace(/\n*Thanks for using CodeRabbit[\s\S]*/i, "");
+    cleaned = cleaned.replace(/\n*❤️\s*Share[\s\S]*/i, "");
+    cleaned = cleaned.replace(/\n*Comment\s+@coderabbitai\s+help[\s\S]*/i, "");
+
+    // Remove review-level summary labels (from the "left a comment" overview block)
+    cleaned = cleaned.replace(/^\s*Actionable comments posted:\s*\d+\s*\n?/m, "");
+    cleaned = cleaned.replace(/^\s*🧹\s*Nitpick(?:\s+comments)?\s*(?:\(\d+\))?\s*\n?/m, "");
+    cleaned = cleaned.replace(/^\s*🤖\s*Prompt for all review comments with AI agents\s*\n?/m, "");
+    cleaned = cleaned.replace(/^\s*ℹ️\s*Review info\s*\n?/m, "");
+
+    // Convert whitespace-only lines to empty lines
+    // (GitHub's collapsed accordion sections contribute spaces-only lines to innerText)
+    cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
+
+    // Collapse 3+ consecutive blank lines to at most 2
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
+    return cleaned.trim();
   }
 
   /**
@@ -449,6 +507,22 @@
       }
     }
 
+    // CodeRabbit: severity from the first line of the comment body
+    // Pattern: "⚠️ Potential issue | 🟡 Minor" or "⚠️ Potential issue | 🟠 Major"
+    if (botConfig && botConfig.name === "CodeRabbit") {
+      const bodyEl = commentEl.querySelector(".comment-body, .js-comment-body");
+      if (bodyEl) {
+        const bodyText = (bodyEl.textContent || "").trim();
+        // Match severity emoji + label: 🔴 Critical, 🟠 Major, 🟡 Minor, 🟢 Low
+        const severityMatch = bodyText.match(/(?:🔴|🟠|🟡|🟢|⚪)\s*(Critical|Major|Minor|Low)\b/i);
+        if (severityMatch) {
+          const severity = severityMatch[1].charAt(0).toUpperCase() + severityMatch[1].slice(1).toLowerCase();
+          console.log("[PR Copy] Detected CodeRabbit severity:", severity);
+          return severity;
+        }
+      }
+    }
+
     return "";
   }
 
@@ -463,6 +537,8 @@
       body = cleanCodexContent(body);
     } else if (botConfig && botConfig.name === "Sentry") {
       body = cleanSentryContent(body);
+    } else if (botConfig && botConfig.name === "CodeRabbit") {
+      body = cleanCodeRabbitContent(body);
     }
 
     return body;

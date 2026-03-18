@@ -20,6 +20,8 @@ A Chrome extension that helps you export GitHub PR review comments with file pat
 Automatically detects and labels reviews from AI code review bots:
 - **GitHub Copilot** → "Export GitHub Copilot Review"
 - **OpenAI Codex** → "Export Codex Review"
+- **Sentry Code Review** → "Export  Sentry Review"
+- **CodeRabbit Code Review** → "Export CodeRabbit Review"
 - Removes bot-specific boilerplate (reaction prompts, badges)
 
 ### 📝 Custom Instructions
