@@ -931,9 +931,16 @@
       e.preventDefault();
       e.stopPropagation();
 
-      const pendingCount = document.querySelectorAll(
-        ".js-resolvable-timeline-thread-form button[type='submit']:not(:disabled)"
-      ).length;
+      // Count only "Resolve conversation" buttons (not "Unresolve conversation")
+      const allForms = document.querySelectorAll(".js-resolvable-timeline-thread-form");
+      let pendingCount = 0;
+      allForms.forEach((form) => {
+        const btn = form.querySelector('button[type="submit"]');
+        if (btn) {
+          const t = (btn.textContent || "").trim().toLowerCase();
+          if (!t.includes("unresolve")) pendingCount++;
+        }
+      });
       const confirmMsg = pendingCount > 0
         ? `Resolve all ${pendingCount} conversation${pendingCount > 1 ? "s" : ""}?`
         : "No unresolved conversations found. Proceed anyway?";
@@ -945,7 +952,11 @@
       let clicked = 0;
       resolveForms.forEach((form) => {
         const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn && !submitBtn.disabled) {
+        if (submitBtn) {
+          // Only click "Resolve conversation", skip "Unresolve conversation"
+          const btnText = (submitBtn.textContent || "").trim().toLowerCase();
+          if (btnText.includes("unresolve")) return;
+
           submitBtn.click();
           clicked++;
         }
