@@ -28,6 +28,10 @@
       name: "CodeRabbit",
       buttonLabel: "Export CodeRabbit Review",
     },
+    "sourcery-ai": {
+      name: "Sourcery",
+      buttonLabel: "Export Sourcery Review",
+    },
   };
 
   function isPullRequestPage() {
@@ -201,6 +205,27 @@
 
     // Convert whitespace-only lines to empty lines
     // (GitHub's collapsed accordion sections contribute spaces-only lines to innerText)
+    cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
+
+    // Collapse 3+ consecutive blank lines to at most 2
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
+    return cleaned.trim();
+  }
+
+  /**
+   * Clean up Sourcery-specific content patterns.
+   * - Converts whitespace-only lines to empty lines
+   *   (clipboard button containers left behind after <button> removal contribute
+   *    spaces-only lines to innerText)
+   * - Collapses 3+ consecutive blank lines to at most 2
+   */
+  function cleanSourceryContent(text) {
+    let cleaned = text;
+
+    // Convert whitespace-only lines to empty lines
+    // (removing <button> inside .zeroclipboard-container leaves whitespace text nodes
+    //  that innerText renders as spaces-only lines)
     cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
 
     // Collapse 3+ consecutive blank lines to at most 2
@@ -539,6 +564,8 @@
       body = cleanSentryContent(body);
     } else if (botConfig && botConfig.name === "CodeRabbit") {
       body = cleanCodeRabbitContent(body);
+    } else if (botConfig && botConfig.name === "Sourcery") {
+      body = cleanSourceryContent(body);
     }
 
     return body;
