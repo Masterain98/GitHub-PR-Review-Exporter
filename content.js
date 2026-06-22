@@ -32,6 +32,11 @@
       name: "Sourcery",
       buttonLabel: "Export Sourcery Review",
     },
+    "qodo-code-review": {
+      name: "Qodo",
+      buttonLabel: "Export Qodo Review",
+      expandDetails: true,  // review items are inside collapsed <details>
+    },
   };
 
   function isPullRequestPage() {
@@ -235,6 +240,33 @@
   }
 
   /**
+   * Clean up Qodo-specific content patterns.
+   * - Converts whitespace-only lines to empty lines
+   * - Removes "Agent prompt" sections (verbose AI-tool prompts at the end of each review item)
+   * - Removes boilerplate footer lines ("ⓘ Copy this prompt...", "ⓘ Recommendations generated...")
+   * - Collapses 3+ consecutive blank lines to at most 2
+   */
+  function cleanQodoContent(text) {
+    let cleaned = text;
+
+    // Convert whitespace-only lines to empty lines
+    cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
+
+    // Remove "Agent prompt" sections and everything up to the next review item or end
+    // These are verbose prompts for AI tools, not useful for human review
+    cleaned = cleaned.replace(/\nAgent prompt\n[\s\S]*?(?=\n\s*\d+\.\s+\S|\n*$)/g, "");
+
+    // Remove boilerplate footer lines
+    cleaned = cleaned.replace(/^\s*ⓘ\s*Copy this prompt and use it to remediate.*$/gm, "");
+    cleaned = cleaned.replace(/^\s*ⓘ\s*Recommendations generated based on similar findings.*$/gm, "");
+
+    // Collapse 3+ consecutive blank lines to at most 2
+    cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+
+    return cleaned.trim();
+  }
+
+  /**
    * Find the outer thread container that contains file path, line info, AND comments
    * This is the <details> element with class "js-comment-container"
    */
@@ -404,7 +436,7 @@
    * 2. task-lists textarea (GitHub's JS component)
    * 3. Rendered comment body + extracted suggestion blocks
    */
-  function getRawCommentBody(commentEl) {
+  function getRawCommentBody(commentEl, botConfig) {
     // Method 1: Look for hidden edit form textarea
     // This is the most reliable source for raw markdown (includes suggestion syntax)
     const editForm = commentEl.querySelector("form.js-comment-edit-form");
@@ -444,13 +476,19 @@
       // Clone the element to manipulate without affecting the page
       const clone = bodyEl.cloneNode(true);
 
+      // Expand collapsed <details> for bots that store review content inside them (e.g. Qodo)
+      if (botConfig && botConfig.expandDetails) {
+        clone.querySelectorAll("details").forEach((d) => d.setAttribute("open", ""));
+      }
+
       // Remove the suggestion UI elements (we'll add them back in markdown format)
       const suggestionBlocks = clone.querySelectorAll(
         ".js-suggested-changes-blob, " +
         ".suggested-change-form-container, " +
         ".js-apply-changes, " +
         "button, " +
-        ".flash"
+        ".flash, " +
+        ".zeroclipboard-container"
       );
       suggestionBlocks.forEach((el) => el.remove());
 
@@ -555,7 +593,7 @@
    * Get comment body with bot-specific cleanup
    */
   function getCleanedCommentBody(commentEl, botConfig) {
-    let body = getRawCommentBody(commentEl);
+    let body = getRawCommentBody(commentEl, botConfig);
 
     // Apply bot-specific cleanup
     if (botConfig && botConfig.name === "Codex") {
@@ -566,6 +604,8 @@
       body = cleanCodeRabbitContent(body);
     } else if (botConfig && botConfig.name === "Sourcery") {
       body = cleanSourceryContent(body);
+    } else if (botConfig && botConfig.name === "Qodo") {
+      body = cleanQodoContent(body);
     }
 
     return body;
