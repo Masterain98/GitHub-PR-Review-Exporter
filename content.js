@@ -169,6 +169,7 @@
    * Extracts the meaningful review content from CodeRabbit's inline comments:
    * - Removes the category/severity first line (surfaced via detectPriority)
    * - Removes collapsed section labels (建议修改, Committable suggestion, Prompt for AI Agents, Analysis chain)
+   * - Removes metadata sections (Autofix, Run configuration, Commits, file lists)
    * - Keeps the title, description, and "Also applies to" references
    */
   function cleanCodeRabbitContent(text) {
@@ -179,7 +180,7 @@
 
     // Remove Analysis chain label line (when section is closed)
     cleaned = cleaned.replace(/^\s*🧩\s*Analysis chain\s*\n?/m, "");
-    // Remove Analysis chain bash script blocks (when section was expanded):
+    // Remove Analysis chain bash script blocks (when section is expanded):
     // Each block runs from "🏁 Script executed:" to "Length of output: N"
     cleaned = cleaned.replace(/🏁\s*Script executed:[\s\S]*?Length of output:\s*\d+\s*\n?/g, "");
     // Remove "Repository: owner/repo" lines that accompany script block output
@@ -208,6 +209,20 @@
     cleaned = cleaned.replace(/^\s*🤖\s*Prompt for all review comments with AI agents\s*\n?/m, "");
     cleaned = cleaned.replace(/^\s*ℹ️\s*Review info\s*\n?/m, "");
 
+    // Remove metadata sections (from summary/parent comments)
+    // Cut from "🪄 Autofix" to end (includes "Push a commit" / "Create a new PR" buttons)
+    cleaned = cleaned.replace(/\n?\s*🪄\s*Autofix[\s\S]*/g, "");
+    // Cut from "⚙️ Run configuration" to end (config details, plan, run ID)
+    cleaned = cleaned.replace(/\n?\s*⚙️\s*Run configuration[\s\S]*/g, "");
+    // Cut from "📥 Commits" to end (commit range, file lists, file filters)
+    cleaned = cleaned.replace(/\n?\s*📥\s*Commits[\s\S]*/g, "");
+    // Cut from "⛔ Files ignored" to end (path filter exclusions + file lists)
+    cleaned = cleaned.replace(/\n?\s*⛔\s*Files ignored[\s\S]*/g, "");
+    // Cut from "📒 Files selected" to end
+    cleaned = cleaned.replace(/\n?\s*📒\s*Files selected[\s\S]*/g, "");
+    // Cut from "💤 Files with no reviewable" to end
+    cleaned = cleaned.replace(/\n?\s*💤\s*Files with no reviewable[\s\S]*/g, "");
+
     // Convert whitespace-only lines to empty lines
     // (GitHub's collapsed accordion sections contribute spaces-only lines to innerText)
     cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
@@ -220,18 +235,34 @@
 
   /**
    * Clean up Sourcery-specific content patterns.
+   * - Strips Reviewer's Guide boilerplate (mermaid diagrams, File-Level Changes table, Tips/docs)
+   * - Strips "Prompt for AI Agents" sections (duplicate of inline reviews)
+   * - Strips Sourcery promo footer and social media links
    * - Converts whitespace-only lines to empty lines
-   *   (clipboard button containers left behind after <button> removal contribute
-   *    spaces-only lines to innerText)
    * - Collapses 3+ consecutive blank lines to at most 2
    */
   function cleanSourceryContent(text) {
     let cleaned = text;
 
     // Convert whitespace-only lines to empty lines
-    // (removing <button> inside .zeroclipboard-container leaves whitespace text nodes
-    //  that innerText renders as spaces-only lines)
     cleaned = cleaned.split('\n').map(line => (/^\s+$/.test(line) ? '' : line)).join('\n');
+
+    // Strip Reviewer's Guide boilerplate: keep only the summary paragraph.
+    // Remove from "Sequence diagram" (mermaid raw text) onward
+    cleaned = cleaned.replace(/\nSequence diagram[\s\S]*/g, "");
+    // Remove from "File-Level Changes" (table) onward
+    cleaned = cleaned.replace(/\nFile-Level Changes[\s\S]*/g, "");
+
+    // Strip "Tips and commands" section and everything after it
+    // (Sourcery documentation: "Interacting with Sourcery", "Customizing Your Experience", etc.)
+    cleaned = cleaned.replace(/\nInteracting with Sourcery[\s\S]*/g, "");
+
+    // Strip "Prompt for AI Agents" section (verbose duplicate of inline reviews)
+    cleaned = cleaned.replace(/\nPrompt for AI Agents[\s\S]*/g, "");
+
+    // Strip Sourcery promo footer
+    cleaned = cleaned.replace(/\nSourcery is free for open source[\s\S]*/g, "");
+    cleaned = cleaned.replace(/\nHelp me be more useful![\s\S]*/g, "");
 
     // Collapse 3+ consecutive blank lines to at most 2
     cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
@@ -259,6 +290,16 @@
     // Remove boilerplate footer lines
     cleaned = cleaned.replace(/^\s*ⓘ\s*Copy this prompt and use it to remediate.*$/gm, "");
     cleaned = cleaned.replace(/^\s*ⓘ\s*Recommendations generated based on similar findings.*$/gm, "");
+
+    // PR Summary-specific: strip verbose sections, keep description/summary
+    // Strip "Diagram" section (raw mermaid text)
+    cleaned = cleaned.replace(/\nDiagram\n[\s\S]*?(?=\n[A-Z][a-z]+(?:\s|$))/g, "\n");
+    // Strip "High-Level Assessment" section (alternative approaches, pros/cons)
+    cleaned = cleaned.replace(/\nHigh-Level Assessment\n[\s\S]*/g, "");
+    // Strip "Files changed" section (file-level change descriptions)
+    cleaned = cleaned.replace(/\nFiles changed\b[\s\S]*/g, "");
+    // Strip Qodo footer (logo link)
+    cleaned = cleaned.replace(/\nhttps:\/\/www\.qodo\.ai[\s\S]*/g, "");
 
     // Collapse 3+ consecutive blank lines to at most 2
     cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
@@ -937,26 +978,55 @@
     const threadContainers = document.querySelectorAll(
       "details.js-comment-container, " +
       ".review-thread-component, " +
-      ".js-resolvable-timeline-thread-container"
+      ".js-resolvable-timeline-thread-container, " +
+      ".js-timeline-item[id*='pullrequestreview'], " +
+      ".TimelineItem:has(.comment-body)"
     );
 
     threadContainers.forEach((container) => {
       // Skip resolved threads
       if (isThreadResolved(container)) return;
 
+      // Skip parent TimelineItem wrappers that contain child review containers.
+      // These are summary blocks (e.g. CodeRabbit "Actionable comments posted: 17"
+      // or Sourcery "Hey - I've found 3 issues") — the actual reviews are in
+      // their child details.js-comment-container elements, which are also matched
+      // by the selector and processed individually.
+      if (
+        container.classList.contains("TimelineItem") &&
+        container.querySelector("details.js-comment-container, .review-thread-component")
+      ) {
+        return;
+      }
+
+      // Skip PR author description (same logic as injectButtonsIntoThread)
+      if (
+        container.classList.contains("TimelineItem") &&
+        !container.closest('[id*="pullrequestreview"]') &&
+        !container.querySelector(".js-resolvable-timeline-thread-form") &&
+        !container.querySelector('.timeline-comment-header a[href*="/apps/"]')
+      ) {
+        return;
+      }
+
       const firstComment = container.querySelector(
+        '[data-testid="automated-review-comment"], [class*="AutomatedReviewThreadComment-module__automatedComment__"]'
+      ) || container.querySelector(
         ".timeline-comment.js-comment, " +
         ".review-comment.js-comment, " +
         ".js-comment[data-gid], " +
+        ".timeline-comment-group, " +
+        ".js-timeline-comment, " +
         ".js-comments-holder, " +
-        ".comment-body, " +
-        '[class*="AutomatedReviewThreadComment"]'
+        ".comment-body"
       );
 
       if (firstComment) {
         const botConfig = detectAIBot(firstComment);
         const text = buildCopyText(firstComment, botConfig);
         if (text.trim()) {
+          // Skip CodeRabbit "Review skipped" status notices (not actual reviews)
+          if (text.includes("Review skipped")) return;
           reviews.push(text);
         }
       }
@@ -1621,12 +1691,24 @@
     if (!threadContainer) return;
     if (threadContainer.querySelector(".pr-review-export-container")) return;
 
+    // Skip parent TimelineItem wrappers that contain child review containers.
+    // These are summary blocks (e.g. CodeRabbit/Sourcery parent comments);
+    // the actual reviews are in their child details which are processed individually.
+    if (
+      threadContainer.classList.contains("TimelineItem") &&
+      threadContainer.querySelector("details.js-comment-container, .review-thread-component")
+    ) {
+      return;
+    }
+
     // Skip the PR author's main description comment — it's a .TimelineItem but
     // NOT inside a pullrequestreview block and has no resolve form.
+    // Exception: don't skip AI bot comments (they may lack resolve forms but contain reviews).
     if (
       threadContainer.classList.contains("TimelineItem") &&
       !threadContainer.closest('[id*="pullrequestreview"]') &&
-      !threadContainer.querySelector(".js-resolvable-timeline-thread-form")
+      !threadContainer.querySelector(".js-resolvable-timeline-thread-form") &&
+      !threadContainer.querySelector('.timeline-comment-header a[href*="/apps/"]')
     ) {
       return;
     }
